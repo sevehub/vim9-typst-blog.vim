@@ -172,7 +172,7 @@ enddef
 # Creates {DRAFT}/{slug}.typ prefilled with the standard article preamble
 # (title + today's date filled in, subtitle/keywords left for you) and
 # opens it, cursor ready inside the subtitle field.
-def typst_blog#New(title: string)
+export def BlogNew(title: string)
   if empty(trim(title))
     echoerr 'typst-blog: BlogNew requires a title, e.g. :BlogNew My New Post'
     return
@@ -214,7 +214,7 @@ enddef
 # inside a git repo, so history follows the file), then reopens it there.
 # The Node/Typst build (your Makefile) is left untouched - run :BlogCompile
 # or your usual `make` afterwards.
-def typst_blog#Publish()
+export def BlogPublish()
   var current = expand('%:p')
   if empty(current)
     echoerr 'typst-blog: no file in the current buffer'
@@ -269,15 +269,15 @@ def typst_blog#Publish()
 enddef
 
 # :BlogList / :BlogListAll / :BlogOpenDrafts / :BlogOpenPublished
-def typst_blog#ListDrafts()
-  typst_blog#OpenDir('draft')
+export def BlogListDrafts()
+  OpenDir('draft')
 enddef
 
-def typst_blog#ListAll()
+export def BlogListAll()
   OpenPicked(DraftFiles() + PublishedFiles())
 enddef
 
-def typst_blog#OpenDir(which: string)
+export def BlogOpenDir(which: string)
   var dir = which ==# 'publish' ? PublishDir() : DraftDir()
   if !isdirectory(dir)
     echo $'typst-blog: {dir} does not exist yet'
@@ -294,7 +294,7 @@ enddef
 # Zettelkasten-style cross-linking: fuzzy-pick another article (draft or
 # published) and insert a #link(...)[Title] to it on the line below the
 # cursor, using a project-root-relative path.
-def typst_blog#InsertLink()
+export def BlogInsertLink()
   var current = expand('%:p')
   var candidates = filter(DraftFiles() + PublishedFiles(), (_, v) => v !=# current)
 
@@ -315,7 +315,7 @@ enddef
 # :BlogBacklinks
 # Populates the quickfix list with every article that already links to the
 # current one, so you can walk your Zettelkasten backwards.
-def typst_blog#Backlinks()
+export def BlogBacklinks()
   var current = expand('%:p')
   if empty(current)
     echoerr 'typst-blog: no file in the current buffer'
@@ -352,7 +352,7 @@ enddef
 # runs `make` in the project root (the Makefile you already maintain to
 # drive Build-TypstSite.js), and finally falls back to a raw
 # `typst compile` on the current file if neither is available.
-def typst_blog#Compile()
+export def BlogCompile()
   if !empty(g:typst_blog_compile_cmd) && exists(':' .. g:typst_blog_compile_cmd) == 2
     execute g:typst_blog_compile_cmd
     return
