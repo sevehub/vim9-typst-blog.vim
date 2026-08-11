@@ -196,10 +196,10 @@ export def BlogNew(title: string)
     endif
     return
   endif
-
-  execute 'edit ' .. fnameescape(fullpath)
+  execute 'noautocmd edit ' .. fnameescape(fullpath)
   setline(1, BuildPreamble(title))
   silent write
+  &filetype = 'typst'
 
   var subtitleLnum = search('^\s*subtitle:\s*""', 'nw')
   if subtitleLnum > 0

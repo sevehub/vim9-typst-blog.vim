@@ -1,4 +1,5 @@
 vim9script
+import autoload 'typst_blog.vim' as blog
 # plugin/typst-blog.vim
 # vim9-typst-blog.vim - Draft/publish/link management for a Typst-powered
 # static blog (SEVETECH / PaperStackPro workflow).
@@ -64,13 +65,12 @@ g:typst_blog_picker = get(g:, 'typst_blog_picker', '')
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
-
-command! -nargs=1 BlogNew                 call BlogNew(<q-args>)
-command! -nargs=0 -bar BlogPublish        call BlogPublish()
-command! -nargs=0 -bar BlogList           call BlogListDrafts()
-command! -nargs=0 -bar BlogListAll        call BlogListAll()
-command! -nargs=0 -bar BlogLink           call BlogInsertLink()
-command! -nargs=0 -bar BlogBacklinks      call BlogBacklinks()
-command! -nargs=0 -bar BlogCompile        call BlogCompile()
-command! -nargs=0 -bar BlogOpenDrafts     call BlogOpenDir('draft')
-command! -nargs=0 -bar BlogOpenPublished  call BlogOpenDir('publish')
+command! -nargs=1 BlogNew                 call blog.BlogNew(<q-args>)
+command! -nargs=0 -bar BlogPublish        call blog.BlogPublish()
+command! -nargs=0 -bar BlogList           call blog.BlogListDrafts()
+command! -nargs=0 -bar BlogListAll        call blog.BlogListAll()
+command! -nargs=0 -bar BlogLink           call blog.BlogInsertLink()
+command! -nargs=0 -bar BlogBacklinks      call blog.BlogBacklinks()
+command! -nargs=0 -bar BlogCompile        call blog.BlogCompile()
+command! -nargs=0 -bar BlogOpenDrafts     call blog.BlogOpenDir('draft')
+command! -nargs=0 -bar BlogOpenPublished  call blog.BlogOpenDir('publish')
