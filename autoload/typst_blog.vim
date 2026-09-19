@@ -270,7 +270,8 @@ enddef
 
 # :BlogList / :BlogListAll / :BlogOpenDrafts / :BlogOpenPublished
 export def BlogListDrafts()
-  OpenDir('draft')
+ echom "Open List Drafts"
+  BlogOpenDir('DRAFT')
 enddef
 
 export def BlogListAll()

@@ -21,19 +21,15 @@ Vim 9.0+, `+vim9script`. Manual install (or use your plugin manager of
 choice — no dependencies required):
 
 ```sh
-mkdir -p \\\~/.vim/pack/bundle/start
-git clone https://github.com/sevehub/vim9-typst-blog.vim \\\\
-    \\\~/.vim/pack/bundle/start/vim9-typst-blog.vim
+git clone https://github.com/sevehub/vim9-typst-blog.vim ~/vimfiles/pack/plugin/start/vim9-typst-blog.vim
 ```
 
 Optionally, also install the two companion plugins for the full
 experience (see [Integrations](#integrations) below):
 
 ```sh
-git clone https://github.com/sevehub/fdminifuzzy.vim \\\\
-    \\\~/.vim/pack/bundle/start/fdminifuzzy.vim
-git clone https://github.com/sevehub/typstpowershell \\\\
-    \\\~/.vim/pack/bundle/start/typstpowershell
+git clone https://github.com/sevehub/fdminifuzzy.vim ~/vimfiles/pack/plugin/start/fdminifuzzy.vim
+git clone https://github.com/sevehub/typstpowershell ~/vimfiles/pack/plugin/start/typstpowershell
 ```
 
 ## Layout this plugin expects
@@ -42,12 +38,12 @@ git clone https://github.com/sevehub/typstpowershell \\\\
 <project root>/
 ├── DRAFT/          # :BlogNew writes here
 ├── DOCUMENTS/       # :BlogPublish moves here
-├── libs/website.typ # already exists, never touched by this plugin
+├── DOCUMENTS/libs/website.typ # already exists, never touched by this plugin
 └── Makefile          # your existing build entry point
 ```
 
-Set `g:typst\\\_blog\\\_root` if Vim's cwd isn't your project root, and
-`g:typst\\\_blog\\\_draft\\\_dir` / `g:typst\\\_blog\\\_publish\\\_dir` if your directory
+Set `g:typst_blog_root` if Vim's cwd isn't your project root, and
+`g:typst_blog_draft_dir` / `g:typst_blog_publish_dir` if your directory
 names differ from `DRAFT` / `DOCUMENTS`.
 
 ## Commands
@@ -98,9 +94,9 @@ you don't need this plugin's source to match their exact API — just
 point the config variable at whatever they actually call things:
 
 ```vim
-" defaults shown
-let g:typst\\\_blog\\\_fuzzy\\\_cmd   = 'FdMiniFuzzy'   " sevehub/fdminifuzzy.vim
-let g:typst\\\_blog\\\_compile\\\_cmd = 'TypstCompile'  " sevehub/typstpowershell
+# defaults shown
+let g:typst_blog_fuzzy_cmd   = 'FdMiniFuzzy'   " sevehub/fdminifuzzy.vim
+let g:typst_blog_compile_cmd = 'TypstCompile'  " sevehub/typstpowershell
 ```
 
 * **fdminifuzzy.vim** — used by `:BlogList` / `:BlogListAll` /
@@ -115,7 +111,7 @@ instead. If fdminifuzzy.vim exposes a synchronous "return the pick"
 function rather than only an `:Ex` command, wire it in directly:
 
 ```vim
-  let g:typst\\\_blog\\\_picker = (files) => fdminifuzzy#PickOne(files)
+  let g:typst_blog_picker = (files) => fdminifuzzy#PickOne(files)
   ```
 
 * **typstpowershell** — `:BlogCompile` runs its compile command when
@@ -129,10 +125,10 @@ raw `typst compile` on the current file.
 
 ## Suggested mappings
 
-Buffer-local mappings are set automatically for `\\\*.typ` files, rooted at
-`g:typst\\\_blog\\\_map\\\_prefix` (default `<localleader>b`): `<prefix>n/p/l/a/i/b/c`
+Buffer-local mappings are set automatically for `*.typ` files, rooted at
+`g:typst_blog_map_prefix` (default `<localleader>b`): `<prefix>n/p/l/a/i/b/c`
 for New/Publish/List/ListAll/Link/Backlinks/Compile. Set
-`g:typst\\\_blog\\\_no\\\_mappings = v:true` to disable and roll your own.
+`g:typst_blog_no_mappings = v:true` to disable and roll your own.
 
 ## License
 
