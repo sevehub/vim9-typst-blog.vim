@@ -1,8 +1,8 @@
 vim9script
 # autoload/typst_blog.vim
-# Drafts : Markdown files in a Logseq folder   (g:typst_blog_draft_dir)
-# Posts  : Typst files in the blog git repo    (g:typst_blog_root + g:typst_blog_publish_dir)
-# :BlogPublish converts draft.md -> post.typ (preamble + body) inside the repo.
+# Drafts : Markdown files             (g:typst_blog_draft_dir)
+# Posts  : Typst files in the blog repo (g:typst_blog_root + g:typst_blog_publish_dir)
+# :BlogPublish converts draft.md -> post.typ (preamble + body).
 # website.typ is only imported by generated preambles, never written.
 
 # ---------------------------------------------------------------------------
@@ -32,12 +32,10 @@ def Root(): string
   return AsDir(g:typst_blog_root)
 enddef
 
-# Logseq draft folder (Markdown).
+# Draft folder (Markdown), relative to the root unless absolute.
 def DraftDir(): string
-  if empty(g:typst_blog_draft_dir)
-    throw 'typst-blog: set g:typst_blog_draft_dir to the Logseq Blog folder'
-  endif
-  return AsDir(g:typst_blog_draft_dir)
+  var rel = g:typst_blog_draft_dir
+  return AsDir(IsAbsolute(rel) ? rel : Root() .. rel)
 enddef
 
 # Published Typst folder, inside the git repo.
@@ -77,7 +75,7 @@ def PublishedFiles(): list<string>
 enddef
 
 export def IsDraft(path: string): bool
-  return !empty(g:typst_blog_draft_dir) && !empty(path)
+  return !empty(path)
     && IsInside(path, DraftDir()) && path =~# escape(g:typst_blog_draft_ext, '.') .. '$'
 enddef
 
@@ -148,20 +146,26 @@ enddef
 # Draft parsing, conversion, preamble
 # ---------------------------------------------------------------------------
 
-# Leading Logseq properties (`key:: value`) become metadata; the first
-# `# Heading` is the title and is dropped from the body.
+# Optional YAML front matter (title, subtitle, keywords, author) becomes
+# metadata. A first `# Heading` is used as the title if none is given and is
+# dropped from the body. Fallback title: the file name.
 def ParseDraft(path: string): dict<any>
   var lines = readfile(path)
   var meta: dict<string> = {}
   var i = 0
-  while i < len(lines)
-    var m = matchlist(lines[i], '^\s*\([A-Za-z][A-Za-z0-9_-]*\)::\s*\(.*\)$')
-    if empty(m)
-      break
+  if !empty(lines) && lines[0] =~# '^---\s*$'
+    var j = 1
+    while j < len(lines) && lines[j] !~# '^\(---\|\.\.\.\)\s*$'
+      var m = matchlist(lines[j], '^\([A-Za-z][A-Za-z0-9_-]*\):\s*\(.*\)$')
+      if !empty(m)
+        meta[tolower(m[1])] = substitute(trim(m[2]), '^\([''"]\)\(.*\)\1$', '\2', '')
+      endif
+      j += 1
+    endwhile
+    if j < len(lines)
+      i = j + 1
     endif
-    meta[tolower(m[1])] = trim(m[2])
-    i += 1
-  endwhile
+  endif
   while i < len(lines) && empty(trim(lines[i]))
     i += 1
   endwhile
@@ -224,7 +228,7 @@ enddef
 # Commands
 # ---------------------------------------------------------------------------
 
-# :BlogNew {title}  ->  {draft_dir}/{slug}.md (Logseq), no Typst preamble.
+# :BlogNew {title}  ->  {draft_dir}/{slug}.md with YAML front matter, no Typst preamble.
 export def BlogNew(title: string)
   if empty(trim(title))
     echoerr 'typst-blog: BlogNew requires a title, e.g. :BlogNew My New Post'
@@ -249,19 +253,19 @@ export def BlogNew(title: string)
   endif
 
   execute 'noautocmd edit ' .. fnameescape(fullpath)
-  setline(1, ['subtitle:: ', 'keywords:: ', '', '# ' .. title, '', ''])
+  setline(1, ['---', 'title: ' .. title, 'subtitle: ', 'keywords: ', '---', '', ''])
   silent write
   &filetype = 'markdown'
-  cursor(1, 1)
+  cursor(3, 1)
   startinsert!
 enddef
 
 # :BlogPublish  ->  draft.md becomes {root}/{publish_dir}/{slug}.typ with the
-# Typst preamble, then opens it. The draft stays in Logseq untouched.
+# Typst preamble, then opens it. The draft is left untouched.
 export def BlogPublish()
   var current = expand('%:p')
   if !IsDraft(current)
-    echoerr 'typst-blog: current file is not a draft in g:typst_blog_draft_dir'
+    echoerr 'typst-blog: current file is not a draft (see g:typst_blog_draft_dir)'
     return
   endif
   update

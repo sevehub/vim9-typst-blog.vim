@@ -23,12 +23,12 @@ endif
 # or at any point with `:let g:typst_blog_xxx = ...` and re-source).
 # ---------------------------------------------------------------------------
 
-# Blog git repo root (Typst posts are written here).
+# Blog repo root (Typst posts are written here).
 g:typst_blog_root = get(g:, 'typst_blog_root', getcwd())
 
-# Logseq draft folder (Markdown). Absolute path, e.g. 'C:/logseq/pages/Blog'.
-# Created on first :BlogNew. REQUIRED.
-g:typst_blog_draft_dir = get(g:, 'typst_blog_draft_dir', '')
+# Draft folder (Markdown), relative to g:typst_blog_root unless absolute.
+# Point it outside the repo to keep drafts private. Created on first :BlogNew.
+g:typst_blog_draft_dir = get(g:, 'typst_blog_draft_dir', 'DRAFT')
 
 # Published posts, relative to g:typst_blog_root unless absolute.
 g:typst_blog_publish_dir = get(g:, 'typst_blog_publish_dir', 'posts')

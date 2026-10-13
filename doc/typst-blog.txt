@@ -1,141 +1,171 @@
-*typst-blog.txt*   Draft / publish / link management for a Typst blog
+*typst-blog.txt*   Markdown drafts, Typst posts, Zettelkasten links
 
                       VIM9-TYPST-BLOG.VIM
-                Draft > Publish > Zettelkasten links
-                       for Typst-powered blogs
+              Draft (Markdown) > Publish (Typst) > Link
 
 ==============================================================================
 CONTENTS                                                *typst-blog-contents*
 
     1. Intro .......................... |typst-blog-intro|
     2. Setup .......................... |typst-blog-setup|
-    3. Commands ....................... |typst-blog-commands|
-    4. Configuration .................. |typst-blog-config|
-    5. Integrations ................... |typst-blog-integrations|
-    6. Mappings ....................... |typst-blog-mappings|
+    3. Drafts ......................... |typst-blog-drafts|
+    4. Commands ....................... |typst-blog-commands|
+    5. Configuration .................. |typst-blog-config|
+    6. Integrations ................... |typst-blog-integrations|
+    7. Mappings ....................... |typst-blog-mappings|
 
 ==============================================================================
 1. Intro                                                   *typst-blog-intro*
 
 vim9-typst-blog.vim manages the drafting workflow for a Typst-powered
-static blog: it creates new articles pre-filled with your standard
-`article` preamble, moves finished drafts from a DRAFT directory into a
-DOCUMENTS directory, and helps you cross-link articles Zettelkasten-style.
+static blog. Drafts are plain Markdown files in any directory. On publish,
+a draft is converted to a Typst post: the standard `article` preamble is
+added and the body is converted (pandoc by default) and written into the
+blog repository. Published posts can be cross-linked Zettelkasten-style.
 
-It never generates or edits your shared `website.typ` import - that file
-is assumed to already exist. It also never runs your build pipeline for
-you unless you ask it to via |:BlogCompile| - your Makefile / Node build
-script (e.g. Build-TypstSite.js) remains the source of truth for
-compiling the site.
+Two locations are configured: the draft directory (|g:typst_blog_draft_dir|)
+and the blog repository (|g:typst_blog_root|). They may be the same
+repository or entirely separate.
+
+The plugin never generates or edits `website.typ`; it is only imported by
+generated preambles. The build is never run unless |:BlogCompile| is called.
 
 ==============================================================================
 2. Setup                                                   *typst-blog-setup*
 
-Install with your favourite Vim9 plugin manager, or manually:
->
-    mkdir -p ~/.vim/pack/bundle/start
+Install with a Vim9 plugin manager, or manually: >
+
     git clone https://github.com/sevehub/vim9-typst-blog.vim \
         ~/.vim/pack/bundle/start/vim9-typst-blog.vim
 <
-Then, from the root of a blog project (or after setting |g:typst_blog_root|),
-open Vim and run |:BlogNew|.
+Set the two locations in the vimrc, for example: >
+
+    g:typst_blog_root      = 'C:/work/blog'
+    g:typst_blog_draft_dir = 'C:/notes/blog-drafts'
+<
+Requires Vim 9.0+ with |+vim9script|. Conversion requires `pandoc` on the
+PATH (see |g:typst_blog_convert_cmd|); without it the body is copied
+unconverted.
 
 ==============================================================================
-3. Commands                                              *typst-blog-commands*
+3. Drafts                                                *typst-blog-drafts*
+
+A draft is a Markdown file with optional YAML front matter: >
+
+    ---
+    title: My Post
+    subtitle: A short line
+    keywords: typst, vim
+    author: SEVETECH
+    ---
+
+    Body in Markdown.
+<
+Recognised keys: `title`, `subtitle`, `keywords`, `author`. When `title` is
+missing, a first `# Heading` is used; when both are missing, the file name
+is used. A first heading is removed from the body, since the preamble adds
+the title heading itself. Missing `author` falls back to |g:typst_blog_author|.
+
+==============================================================================
+4. Commands                                              *typst-blog-commands*
 
 :BlogNew {title}                                                  *:BlogNew*
-    Create `{DRAFT}/{slug}.md`, pre-filled with the standard article
-    preamble (title and today's date filled in; subtitle and keywords
-    left blank for you), write it to disk, and place the cursor inside
-    the subtitle field in insert mode.
+    Create `{draft_dir}/{slug}.md` with front matter (title filled in,
+    subtitle and keywords blank), write it, and start insert mode on the
+    subtitle line. The directory is created when missing.
 
 :BlogPublish                                                  *:BlogPublish*
-    Move the current buffer's file from DRAFT into DOCUMENTS. Uses
-    `git mv` when the project root is a git repository (so history
-    follows the file), otherwise a plain rename. Reopens the buffer at
-    its new location. Does NOT run your build - call |:BlogCompile|
-    afterwards, or run your own `make` as usual.
+    Convert the current draft into `{root}/{publish_dir}/{slug}.typ`:
+    preamble (title, subtitle, author, today's date, keywords), a title
+    heading, and the converted body. The new file is opened. The draft is
+    left unchanged. Asks before overwriting an existing post. Only works
+    for files inside |g:typst_blog_draft_dir|.
 
 :BlogList                                                        *:BlogList*
-    Fuzzy-pick and open a file from DRAFT. Delegates to
-    fdminifuzzy.vim when available (see |typst-blog-integrations|),
-    otherwise uses a built-in matchfuzzy() picker.
+    Fuzzy-pick and open a draft. Delegates to fdminifuzzy.vim when
+    available (see |typst-blog-integrations|), otherwise uses a built-in
+    matchfuzzy() picker.
 
 :BlogListAll                                                  *:BlogListAll*
-    Same as |:BlogList| but searches DRAFT and DOCUMENTS together.
+    Same as |:BlogList|, searching drafts and published posts together.
 
 :BlogOpenDrafts / :BlogOpenPublished          *:BlogOpenDrafts* *:BlogOpenPublished*
-    Open the fuzzy picker scoped to just DRAFT or just DOCUMENTS.
+    Open the picker scoped to drafts or to published posts.
 
 :BlogLink                                                        *:BlogLink*
-    Zettelkasten cross-linking. Fuzzy-pick any other article (draft or
-    published) and insert `#link("/DOCUMENTS/foo.typ")[Title]` on the
-    line below the cursor, using a project-root-relative path and the
-    title parsed out of that article's own preamble.
+    Fuzzy-pick a published post and insert
+    `#link("/posts/foo.typ")[Title]` below the cursor, using a repo-root
+    relative path and the title parsed from that post's preamble. Drafts
+    are not linkable.
 
 :BlogBacklinks                                              *:BlogBacklinks*
-    Populate the quickfix list with every article that already links to
-    the current one (i.e. contains its root-relative path), so you can
-    walk your Zettelkasten backwards. Opens the quickfix window.
+    Fill the quickfix list with every published post that links to the
+    current one and open it.
 
 :BlogCompile                                                  *:BlogCompile*
-    Prefer your typstpowershell compile command if it's loaded, else run
-    `make` in the project root, else fall back to a raw `typst compile`
-    on the current file. See |g:typst_blog_compile_cmd|.
+    Run the typstpowershell compile command when loaded, else `make` in
+    |g:typst_blog_root|, else `typst compile` on the current `.typ` file.
+    See |g:typst_blog_compile_cmd|.
 
 ==============================================================================
-4. Configuration                                            *typst-blog-config*
+5. Configuration                                            *typst-blog-config*
 
                                                         *g:typst_blog_root*
 g:typst_blog_root ~
-    Project root. Everything else is resolved relative to this.
+    Blog repository root. Published posts are written below it.
     Default: |getcwd()| at plugin-load time.
 
                                                     *g:typst_blog_draft_dir*
 g:typst_blog_draft_dir ~
-    Draft directory, relative to |g:typst_blog_root| unless absolute.
-    Default: `"DRAFT"`.
+    Draft directory (Markdown). Relative to |g:typst_blog_root| unless
+    absolute. Default: `"DRAFT"`.
 
                                                   *g:typst_blog_publish_dir*
 g:typst_blog_publish_dir ~
-    Published/compiled-source directory. Default: `"DOCUMENTS"`.
+    Directory for published Typst posts. Relative to |g:typst_blog_root|
+    unless absolute. Default: `"posts"`.
 
                                                   *g:typst_blog_import_path*
 g:typst_blog_import_path ~
-    Path used in the generated `#import "..."` line. Default:
-    `"/libs/website.typ"`.
+    Path used in the generated `#import "..."` line.
+    Default: `"/libs/website.typ"`.
 
                                                        *g:typst_blog_author*
 g:typst_blog_author ~
-    Author filled into new preambles. Default: `"SEVETECH"`.
+    Author used when a draft has none. Default: `"SEVETECH"`.
+
+                                                    *g:typst_blog_draft_ext*
+g:typst_blog_draft_ext ~
+    Draft file extension. Default: `".md"`.
 
                                                            *g:typst_blog_ext*
 g:typst_blog_ext ~
-    Source file extension. Default: `".typ"`.
+    Published post extension. Default: `".typ"`.
+
+                                                *g:typst_blog_convert_cmd*
+g:typst_blog_convert_cmd ~
+    Command that reads Markdown on stdin and writes Typst on stdout.
+    Default: `"pandoc -f markdown -t typst"`. An empty string disables
+    conversion and the body is copied unchanged.
 
                                                       *g:typst_blog_picker*
 g:typst_blog_picker ~
     Funcref(list<string>): string used by |:BlogLink| (and as a fallback
-    elsewhere) to resolve a list of candidate files down to one path.
-    Default: `''`, meaning the built-in matchfuzzy()+inputlist() picker.
+    elsewhere) to reduce candidate files to one path. Default: `''`, the
+    built-in matchfuzzy()+inputlist() picker.
 
 ==============================================================================
-5. Integrations                                       *typst-blog-integrations*
+6. Integrations                                       *typst-blog-integrations*
 
 fdminifuzzy.vim ~
     https://github.com/sevehub/fdminifuzzy.vim
 
-    |g:typst_blog_fuzzy_cmd| (default `"FdMiniFuzzy"`) names the Ex
-    command used by |:BlogList|, |:BlogListAll|, |:BlogOpenDrafts| and
-    |:BlogOpenPublished| to open a picker scoped to a directory. If the
-    command isn't found, these fall back to the built-in picker
-    automatically - nothing breaks if fdminifuzzy.vim isn't installed or
-    its command name differs; just update |g:typst_blog_fuzzy_cmd|.
+    |g:typst_blog_fuzzy_cmd| (default `"FdMiniFuzzy"`) names the Ex command
+    used by the list commands to open a directory-scoped picker. When the
+    command does not exist, the built-in picker is used.
 
-    |:BlogLink| needs a *value back*, not just a buffer opened, so it
-    always goes through |g:typst_blog_picker| rather than the Ex command.
-    If fdminifuzzy.vim exposes a synchronous "give me the chosen path"
-    function, wire it in: >
+    |:BlogLink| needs the chosen path returned, so it always uses
+    |g:typst_blog_picker|. A synchronous picker can be wired in: >
 
     g:typst_blog_picker = (files) => fdminifuzzy#PickOne(files)
 <
@@ -143,25 +173,16 @@ typstpowershell ~
     https://github.com/sevehub/typstpowershell
 
     |g:typst_blog_compile_cmd| (default `"TypstCompile"`) names the Ex
-    command |:BlogCompile| delegates to when it's loaded. Adjust to match
-    whatever typstpowershell actually calls its compile command; if it
-    isn't found, |:BlogCompile| falls back to `make` in the project root,
-    then to a raw `typst compile`.
+    command |:BlogCompile| delegates to when it exists.
 
-    Since both integration points are just command/Funcref *names*, you
-    can repoint them the moment you confirm the exact API either plugin
-    exposes, without touching vim9-typst-blog.vim itself: >
-
-    let g:typst_blog_fuzzy_cmd   = 'WhateverFdMiniFuzzyReallyCallsIt'
-    let g:typst_blog_compile_cmd = 'WhateverTypstPowershellReallyCallsIt'
-<
 ==============================================================================
-6. Mappings                                              *typst-blog-mappings*
+7. Mappings                                              *typst-blog-mappings*
 
-Buffer-local mappings are defined automatically in `.typ` buffers, rooted
-at |g:typst_blog_map_prefix| (default `<localleader>b`):
->
-    <prefix>n   :BlogNew (drops into the command line for the title)
+Buffer-local mappings are defined in `.typ` buffers and in Markdown files
+located inside |g:typst_blog_draft_dir|, rooted at |g:typst_blog_map_prefix|
+(default `<localleader>b`): >
+
+    <prefix>n   :BlogNew (command line, for the title)
     <prefix>p   :BlogPublish
     <prefix>l   :BlogList
     <prefix>a   :BlogListAll
@@ -170,6 +191,8 @@ at |g:typst_blog_map_prefix| (default `<localleader>b`):
     <prefix>c   :BlogCompile
 <
 Set `g:typst_blog_no_mappings = v:true` before the plugin loads to disable
-them entirely and define your own.
+them.
 
  vim:tw=78:ts=8:noet:ft=help:norl:
+
+
