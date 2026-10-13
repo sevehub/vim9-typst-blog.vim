@@ -1,38 +1,49 @@
 vim9script
 # autoload/typst_blog.vim
-# Core logic for vim9-typst-blog.vim.
-#
-# Public entry points are defined with the classic dotted autoload name
-# (typst_blog#Xxx) so they can be called from :command definitions in
-# plugin/typst-blog.vim without needing `import autoload`.
-#
-# NOTE: this plugin never writes to /libs/website.typ - that file is
-# assumed to already exist and is only ever *imported* from generated
-# preambles.
+# Drafts : Markdown files in a Logseq folder   (g:typst_blog_draft_dir)
+# Posts  : Typst files in the blog git repo    (g:typst_blog_root + g:typst_blog_publish_dir)
+# :BlogPublish converts draft.md -> post.typ (preamble + body) inside the repo.
+# website.typ is only imported by generated preambles, never written.
 
 # ---------------------------------------------------------------------------
-# Path helpers
+# Paths
 # ---------------------------------------------------------------------------
 
-def Root(): string
-  return fnamemodify(g:typst_blog_root, ':p')
+def AsDir(path: string): string
+  var p = fnamemodify(expand(path), ':p')
+  return p =~# '[/\\]$' ? p : p .. '/'
+enddef
+
+def Norm(path: string): string
+  var p = substitute(fnamemodify(path, ':p'), '\\', '/', 'g')
+  return has('win32') ? tolower(p) : p
 enddef
 
 def IsAbsolute(path: string): bool
   return path =~# '^\([/\\]\|[A-Za-z]:[/\\]\)'
 enddef
 
-def ResolveDir(rel: string): string
-  var target = IsAbsolute(rel) ? rel : Root() .. rel
-  return fnamemodify(target, ':p')
+def IsInside(path: string, dir: string): bool
+  return stridx(Norm(path), Norm(AsDir(dir))) == 0
 enddef
 
+# Blog git repo root.
+def Root(): string
+  return AsDir(g:typst_blog_root)
+enddef
+
+# Logseq draft folder (Markdown).
 def DraftDir(): string
-  return ResolveDir(g:typst_blog_draft_dir)
+  if empty(g:typst_blog_draft_dir)
+    throw 'typst-blog: set g:typst_blog_draft_dir to the Logseq Blog folder'
+  endif
+  return AsDir(g:typst_blog_draft_dir)
 enddef
 
+# Published Typst folder, inside the git repo.
 def PublishDir(): string
-  return ResolveDir(g:typst_blog_publish_dir)
+  var rel = g:typst_blog_publish_dir
+  return AsDir(IsAbsolute(rel) ? rel : Root() .. rel)
 enddef
 
 def EnsureDir(dir: string)
@@ -41,41 +52,43 @@ def EnsureDir(dir: string)
   endif
 enddef
 
-# Absolute-from-project-root path, e.g. "/DRAFT/my-post.typ", matching the
-# same absolute-import convention website.typ already uses for /libs/...
+# "/posts/my-post.typ": repo-root-absolute, same convention as /libs/website.typ.
 def RootRelative(path: string): string
-  var root = Root()
-  var abs = fnamemodify(path, ':p')
-  if strpart(abs, 0, len(root)) ==# root
-    return '/' .. strpart(abs, len(root))
+  if IsInside(path, Root())
+    var p = substitute(fnamemodify(path, ':p'), '\\', '/', 'g')
+    return '/' .. strpart(p, len(Root()))
   endif
-  return abs
+  return fnamemodify(path, ':p')
 enddef
 
-def Files(dir: string): list<string>
+def Files(dir: string, ext: string): list<string>
   if !isdirectory(dir)
     return []
   endif
-  return sort(glob(dir .. '*' .. g:typst_blog_ext, false, true))
+  return sort(glob(dir .. '*' .. ext, false, true))
 enddef
 
 def DraftFiles(): list<string>
-  return Files(DraftDir())
+  return Files(DraftDir(), g:typst_blog_draft_ext)
 enddef
 
 def PublishedFiles(): list<string>
-  return Files(PublishDir())
+  return Files(PublishDir(), g:typst_blog_ext)
+enddef
+
+export def IsDraft(path: string): bool
+  return !empty(g:typst_blog_draft_dir) && !empty(path)
+    && IsInside(path, DraftDir()) && path =~# escape(g:typst_blog_draft_ext, '.') .. '$'
 enddef
 
 # ---------------------------------------------------------------------------
-# Slug / title helpers
+# Slug / title
 # ---------------------------------------------------------------------------
 
 def Slugify(title: string): string
   var s = tolower(title)
   s = substitute(s, '[^a-z0-9]\+', '-', 'g')
-  s = substitute(s, '^-\+\|-\+$', '', 'g')
-  return s
+  return substitute(s, '^-\+\|-\+$', '', 'g')
 enddef
 
 def ExtractTitle(path: string): string
@@ -91,10 +104,7 @@ def ExtractTitle(path: string): string
 enddef
 
 # ---------------------------------------------------------------------------
-# Picker: prefers sevehub/fdminifuzzy.vim, falls back to a small built-in
-# matchfuzzy() + inputlist() picker so the plugin still works standalone.
-# Override g:typst_blog_picker with your own Funcref(list<string>): string
-# if fdminifuzzy.vim exposes a synchronous selection API you'd rather use.
+# Picker (fdminifuzzy.vim if present, else matchfuzzy()+inputlist())
 # ---------------------------------------------------------------------------
 
 def DefaultPicker(files: list<string>): string
@@ -119,18 +129,12 @@ def DefaultPicker(files: list<string>): string
     i += 1
   endfor
   var choice = inputlist(menu)
-  if choice < 1 || choice > len(matches)
-    return ''
-  endif
-  return matches[choice - 1]
+  return (choice < 1 || choice > len(matches)) ? '' : matches[choice - 1]
 enddef
 
 def Pick(files: list<string>): string
   var Picker = get(g:, 'typst_blog_picker', '')
-  if empty(Picker)
-    return DefaultPicker(files)
-  endif
-  return call(Picker, [files])
+  return empty(Picker) ? DefaultPicker(files) : call(Picker, [files])
 enddef
 
 def OpenPicked(files: list<string>)
@@ -141,137 +145,158 @@ def OpenPicked(files: list<string>)
 enddef
 
 # ---------------------------------------------------------------------------
-# Preamble
+# Draft parsing, conversion, preamble
 # ---------------------------------------------------------------------------
 
-def BuildPreamble(title: string): list<string>
+# Leading Logseq properties (`key:: value`) become metadata; the first
+# `# Heading` is the title and is dropped from the body.
+def ParseDraft(path: string): dict<any>
+  var lines = readfile(path)
+  var meta: dict<string> = {}
+  var i = 0
+  while i < len(lines)
+    var m = matchlist(lines[i], '^\s*\([A-Za-z][A-Za-z0-9_-]*\)::\s*\(.*\)$')
+    if empty(m)
+      break
+    endif
+    meta[tolower(m[1])] = trim(m[2])
+    i += 1
+  endwhile
+  while i < len(lines) && empty(trim(lines[i]))
+    i += 1
+  endwhile
+  var h = i < len(lines) ? matchlist(lines[i], '^#\s\+\(.\{-}\)\s*$') : []
+  if !empty(h)
+    if empty(get(meta, 'title', ''))
+      meta.title = h[1]
+    endif
+    i += 1
+  endif
+  if empty(get(meta, 'title', ''))
+    meta.title = fnamemodify(path, ':t:r')
+  endif
+  return {meta: meta, body: lines[i :]}
+enddef
+
+# Markdown -> Typst via g:typst_blog_convert_cmd (default pandoc). Body passes
+# through unchanged when the converter is missing or disabled.
+def Convert(body: list<string>): list<string>
+  var cmd = g:typst_blog_convert_cmd
+  if empty(cmd) || !executable(split(cmd)[0])
+    echo 'typst-blog: converter not available, body copied unconverted'
+    return body
+  endif
+  var out = system(cmd, join(body, "\n") .. "\n")
+  if v:shell_error != 0
+    throw $'typst-blog: converter failed: {out}'
+  endif
+  var res = split(out, '\r\?\n', true)
+  while !empty(res) && empty(res[-1])
+    remove(res, -1)
+  endwhile
+  return res
+enddef
+
+def Q(s: string): string
+  return escape(s, '\"')
+enddef
+
+def BuildPreamble(meta: dict<string>): list<string>
   var y = str2nr(strftime('%Y'))
   var m = str2nr(strftime('%m'))
   var d = str2nr(strftime('%d'))
   return [
     '#import "' .. g:typst_blog_import_path .. '": article',
     '#show: article.with(',
-    '  title: "' .. escape(title, '"') .. '",',
-    '  subtitle: "",',
-    '  author: "' .. g:typst_blog_author .. '",',
+    '  title: "' .. Q(meta.title) .. '",',
+    '  subtitle: "' .. Q(get(meta, 'subtitle', '')) .. '",',
+    '  author: "' .. Q(get(meta, 'author', g:typst_blog_author)) .. '",',
     '  date: datetime(year: ' .. y .. ', month: ' .. m .. ', day: ' .. d .. '),',
-    '  keywords: "",',
+    '  keywords: "' .. Q(get(meta, 'keywords', '')) .. '",',
     ')',
     '',
-    '= ' .. title,
-    '',
+    '= ' .. meta.title,
     '',
   ]
 enddef
 
 # ---------------------------------------------------------------------------
-# Public commands
+# Commands
 # ---------------------------------------------------------------------------
 
-# :BlogNew {title}
-# Creates {DRAFT}/{slug}.typ prefilled with the standard article preamble
-# (title + today's date filled in, subtitle/keywords left for you) and
-# opens it, cursor ready inside the subtitle field.
+# :BlogNew {title}  ->  {draft_dir}/{slug}.md (Logseq), no Typst preamble.
 export def BlogNew(title: string)
   if empty(trim(title))
     echoerr 'typst-blog: BlogNew requires a title, e.g. :BlogNew My New Post'
     return
   endif
-
-  var draftDir = DraftDir()
-  EnsureDir(draftDir)
-
   var slug = Slugify(title)
   if empty(slug)
     echoerr $'typst-blog: could not derive a filename slug from "{title}"'
     return
   endif
 
-  var fullpath = draftDir .. slug .. g:typst_blog_ext
+  var draftDir = DraftDir()
+  EnsureDir(draftDir)
+  var fullpath = draftDir .. slug .. g:typst_blog_draft_ext
 
   if filereadable(fullpath)
-    var choice = confirm($'{fnamemodify(fullpath, ":t")} already exists in DRAFT.', "&Open it\n&Cancel", 1)
+    var choice = confirm($'{fnamemodify(fullpath, ":t")} already exists in drafts.', "&Open it\n&Cancel", 1)
     if choice == 1
       execute 'edit ' .. fnameescape(fullpath)
     endif
     return
   endif
-  execute 'noautocmd edit ' .. fnameescape(fullpath)
-  setline(1, BuildPreamble(title))
-  silent write
-  &filetype = 'typst'
 
-  var subtitleLnum = search('^\s*subtitle:\s*""', 'nw')
-  if subtitleLnum > 0
-    cursor(subtitleLnum, 1)
-    normal! f"l
-    startinsert
-  endif
+  execute 'noautocmd edit ' .. fnameescape(fullpath)
+  setline(1, ['subtitle:: ', 'keywords:: ', '', '# ' .. title, '', ''])
+  silent write
+  &filetype = 'markdown'
+  cursor(1, 1)
+  startinsert!
 enddef
 
-# :BlogPublish
-# Moves the current buffer's file from DRAFT into DOCUMENTS (git mv when
-# inside a git repo, so history follows the file), then reopens it there.
-# The Node/Typst build (your Makefile) is left untouched - run :BlogCompile
-# or your usual `make` afterwards.
+# :BlogPublish  ->  draft.md becomes {root}/{publish_dir}/{slug}.typ with the
+# Typst preamble, then opens it. The draft stays in Logseq untouched.
 export def BlogPublish()
   var current = expand('%:p')
-  if empty(current)
-    echoerr 'typst-blog: no file in the current buffer'
+  if !IsDraft(current)
+    echoerr 'typst-blog: current file is not a draft in g:typst_blog_draft_dir'
     return
   endif
+  update
 
-  var draftDir = DraftDir()
-  if strpart(current, 0, len(draftDir)) !=# draftDir
-    echoerr $'typst-blog: current file is not inside {g:typst_blog_draft_dir}, refusing to publish'
+  var draft = ParseDraft(current)
+  var body: list<string>
+  try
+    body = Convert(draft.body)
+  catch
+    echoerr v:exception
     return
-  endif
+  endtry
 
   var publishDir = PublishDir()
   EnsureDir(publishDir)
-
-  var basename = fnamemodify(current, ':t')
-  var target = publishDir .. basename
+  var target = publishDir .. fnamemodify(current, ':t:r') .. g:typst_blog_ext
 
   if filereadable(target)
-    var choice = confirm($'{basename} already exists in {g:typst_blog_publish_dir}.', "&Overwrite\n&Cancel", 2)
+    var choice = confirm($'{fnamemodify(target, ":t")} already exists in the blog repo.', "&Overwrite\n&Cancel", 2)
     if choice != 1
       return
     endif
   endif
 
-  update
-
-  var oldBuf = bufnr('%')
-  var moved = false
-
-  if isdirectory(Root() .. '.git')
-    system('git -C ' .. shellescape(Root()) .. ' mv -f -- '
-      .. shellescape(current) .. ' ' .. shellescape(target))
-    moved = v:shell_error == 0 && filereadable(target)
-  endif
-
-  if !moved
-    moved = rename(current, target) == 0
-  endif
-
-  if !moved
-    echoerr $'typst-blog: failed to move {basename} to {g:typst_blog_publish_dir}'
+  if writefile(BuildPreamble(draft.meta) + body, target) != 0
+    echoerr $'typst-blog: failed to write {target}'
     return
   endif
 
   execute 'edit ' .. fnameescape(target)
-  if bufexists(oldBuf) && oldBuf != bufnr('%')
-    execute 'bwipeout ' .. oldBuf
-  endif
-
-  echo $'typst-blog: published {basename} -> {g:typst_blog_publish_dir}'
+  echo $'typst-blog: published {fnamemodify(target, ":t")} -> {RootRelative(target)}'
 enddef
 
-# :BlogList / :BlogListAll / :BlogOpenDrafts / :BlogOpenPublished
 export def BlogListDrafts()
- echom "Open List Drafts"
-  BlogOpenDir('DRAFT')
+  BlogOpenDir('draft')
 enddef
 
 export def BlogListAll()
@@ -279,7 +304,8 @@ export def BlogListAll()
 enddef
 
 export def BlogOpenDir(which: string)
-  var dir = which ==# 'publish' ? PublishDir() : DraftDir()
+  var isPub = which ==# 'publish'
+  var dir = isPub ? PublishDir() : DraftDir()
   if !isdirectory(dir)
     echo $'typst-blog: {dir} does not exist yet'
     return
@@ -288,48 +314,31 @@ export def BlogOpenDir(which: string)
     execute g:typst_blog_fuzzy_cmd .. ' ' .. fnameescape(dir)
     return
   endif
-  OpenPicked(Files(dir))
+  OpenPicked(Files(dir, isPub ? g:typst_blog_ext : g:typst_blog_draft_ext))
 enddef
 
-# :BlogLink
-# Zettelkasten-style cross-linking: fuzzy-pick another article (draft or
-# published) and insert a #link(...)[Title] to it on the line below the
-# cursor, using a project-root-relative path.
+# :BlogLink  ->  #link("/posts/x.typ")[Title] below cursor. Published posts only.
 export def BlogInsertLink()
   var current = expand('%:p')
-  var candidates = filter(DraftFiles() + PublishedFiles(), (_, v) => v !=# current)
-
-  var picked = Pick(candidates)
+  var picked = Pick(filter(PublishedFiles(), (_, v) => v !=# current))
   if empty(picked)
     return
   endif
-
-  var title = ExtractTitle(picked)
-  var linkPath = RootRelative(picked)
-  var linkText = $'#link("{linkPath}")[{title}]'
-
   var here = line('.')
-  append(here, linkText)
+  append(here, $'#link("{RootRelative(picked)}")[{ExtractTitle(picked)}]')
   cursor(here + 1, 1)
 enddef
 
-# :BlogBacklinks
-# Populates the quickfix list with every article that already links to the
-# current one, so you can walk your Zettelkasten backwards.
+# :BlogBacklinks  ->  quickfix of published posts linking to the current one.
 export def BlogBacklinks()
   var current = expand('%:p')
   if empty(current)
     echoerr 'typst-blog: no file in the current buffer'
     return
   endif
-
   var needle = RootRelative(current)
   var qf: list<dict<any>> = []
-
-  for f in filter(DraftFiles() + PublishedFiles(), (_, v) => v !=# current)
-    if !filereadable(f)
-      continue
-    endif
+  for f in filter(PublishedFiles(), (_, v) => v !=# current)
     var lnum = 0
     for l in readfile(f)
       lnum += 1
@@ -338,37 +347,60 @@ export def BlogBacklinks()
       endif
     endfor
   endfor
-
   if empty(qf)
     echo $'typst-blog: no backlinks found for {fnamemodify(current, ":t")}'
     return
   endif
-
   setqflist([], ' ', {title: $'Backlinks: {fnamemodify(current, ":t")}', items: qf})
   copen
 enddef
 
-# :BlogCompile
-# Prefers your typstpowershell compile command if it's loaded, otherwise
-# runs `make` in the project root (the Makefile you already maintain to
-# drive Build-TypstSite.js), and finally falls back to a raw
-# `typst compile` on the current file if neither is available.
+# :BlogCompile  ->  typstpowershell cmd, else `make` in the repo, else typst compile.
 export def BlogCompile()
   if !empty(g:typst_blog_compile_cmd) && exists(':' .. g:typst_blog_compile_cmd) == 2
     execute g:typst_blog_compile_cmd
     return
   endif
-
   var root = Root()
   if filereadable(root .. 'Makefile')
     execute '!make -C ' .. fnameescape(root)
     return
   endif
-
   var current = expand('%:p')
-  if empty(current)
-    echoerr 'typst-blog: no file to compile'
+  if empty(current) || current !~# '\.typ$'
+    echoerr 'typst-blog: no .typ file to compile'
     return
   endif
   execute '!typst compile ' .. fnameescape(current)
 enddef
+
+# ---------------------------------------------------------------------------
+# Buffer-local mappings (called from ftplugin/typst.vim and ftplugin/markdown.vim)
+# ---------------------------------------------------------------------------
+
+export def MapBuffer()
+  if exists('b:did_typst_blog_ftplugin') || get(g:, 'typst_blog_no_mappings', false)
+    return
+  endif
+  b:did_typst_blog_ftplugin = true
+
+  var prefix = get(g:, 'typst_blog_map_prefix', '<localleader>b')
+  var maps: list<list<string>> = [
+    ['n', ':BlogNew '],
+    ['p', '<Cmd>BlogPublish<CR>'],
+    ['l', '<Cmd>BlogList<CR>'],
+    ['a', '<Cmd>BlogListAll<CR>'],
+    ['i', '<Cmd>BlogLink<CR>'],
+    ['b', '<Cmd>BlogBacklinks<CR>'],
+    ['c', '<Cmd>BlogCompile<CR>'],
+  ]
+  var undoParts: list<string> = []
+  for [suffix, rhs] in maps
+    execute 'nnoremap <buffer> ' .. prefix .. suffix .. ' ' .. rhs
+    add(undoParts, 'silent! nunmap <buffer> ' .. prefix .. suffix)
+  endfor
+  add(undoParts, 'unlet! b:did_typst_blog_ftplugin')
+  var previous = get(b:, 'undo_ftplugin', '')
+  b:undo_ftplugin = (empty(previous) ? '' : previous .. ' | ') .. join(undoParts, ' | ')
+enddef
+

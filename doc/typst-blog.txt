@@ -44,7 +44,7 @@ open Vim and run |:BlogNew|.
 3. Commands                                              *typst-blog-commands*
 
 :BlogNew {title}                                                  *:BlogNew*
-    Create `{DRAFT}/{slug}.typ`, pre-filled with the standard article
+    Create `{DRAFT}/{slug}.md`, pre-filled with the standard article
     preamble (title and today's date filled in; subtitle and keywords
     left blank for you), write it to disk, and place the cursor inside
     the subtitle field in insert mode.
