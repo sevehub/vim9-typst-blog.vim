@@ -8,3 +8,4 @@ endif
 if blog.IsDraft(expand('%:p'))
   blog.MapBuffer()
 endif
+
